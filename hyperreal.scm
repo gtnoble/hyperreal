@@ -9,33 +9,41 @@
                    0 
                    (vector-ref vect n)))))
 
-(define (real->hyperreal number)
-  (lambda (n) number))
-
 (define (hyperreal x)
   (cond ((or (list? x) (vector? x)) (reals-seq->hyperreal x))
-        ((number? x) (real->hyperreal x))
         (#t x)))
-
 
 ;; Access the nth element of a hyperreal number
 (define (hyperreal-ref x n)
-  ((hyperreal x) n))
+  (if (number? x) x (x n)))
+
+(define (memoize func)
+  (let ((previous-x '())
+        (previous-y '()))
+    (lambda (x) (if (equal? previous-x x) 
+                    previous-y
+                    (begin
+                      (set! previous-x x)
+                      (set! previous-y (func x))
+                      previous-y)))))
 
 (define (operation-2-hyperreal operator)
   (lambda (x y) 
     (let ((h1 (hyperreal x))
           (h2 (hyperreal y))) 
-      (lambda (n) (operator (hyperreal-ref h1 n) (hyperreal-ref h2 n))))))
+      (memoize 
+        (lambda (n) (operator (hyperreal-ref h1 n) (hyperreal-ref h2 n)))))))
 
 ;; Create a hyperreal number representing a sequence like 1/n
 (define (operation-1-hyperreal operator)
-  (lambda (x) 
+    (lambda (x) 
     (let ((h (hyperreal x))) 
-     (lambda (n) (operator (hyperreal-ref h n))))))  ;; iota generates a list of integers
+     (memoize
+       (lambda (n) (operator (hyperreal-ref h n)))))))  ;; iota generates a list of integers
 
 (define (index-hyperreal)
   (lambda (x) (+ x 1)))
+
 
 ;; Addition of two hyperreal numbers
 (define add-hyperreal (operation-2-hyperreal +))
@@ -51,23 +59,27 @@
 
 (define reciprocal-hyperreal (operation-1-hyperreal (lambda (x) (/ 1 x))))
 
+(define (aitken-extrapolate func)
+  (lambda (n) 
+    (let* ((xn (func n))
+          (xn+1 (func (+ n 1)))
+          (xn+2 (func (+ n 2)))
+          (delta-xn (- xn+1 xn))
+          (delta-squared-xn (+ xn (- (* 2 xn+1)) xn+2))
+          )
+      (- xn (/ (expt delta-xn 2) delta-squared-xn)))))
+
+(define (standard-part h #!optional (n 1000) #!key (extrapolate? #t))
+  (if (number? h) 
+      h 
+      (if extrapolate? 
+          ((aitken-extrapolate (lambda (n) (hyperreal-ref h n))) 
+           n)
+          (hyperreal-ref h n))))
+
 (define (hyperreal-comparison comparator)
-  (lambda (x y #!optional (n 1000) (tol (/ 9 10))) 
-    (letrec ((count-successful-comparisons 
-               (lambda (x y i sum) 
-                 (if (< i 0) 
-                     sum
-                     (count-successful-comparisons
-                       x
-                       y
-                       (- i 1)
-                       (+ sum 
-                          (if (comparator (hyperreal-ref x i) 
-                                          (hyperreal-ref y i)) 
-                              1 
-                              0)))))))
-      (> (/ (count-successful-comparisons x y n 0) n) 
-         tol))))
+  (lambda (x y #!optional (n 1000) #!key (extrapolate? #t)) 
+    (comparator (standard-part x n extrapolate?: extrapolate?) (standard-part y n extrapolate?: extrapolate?))))
 
 ;; Comparison of two hyperreal numbers (equality)
 (define equal-hyperreal? (hyperreal-comparison = ))
@@ -76,12 +88,10 @@
 (define gt-hyperreal? (hyperreal-comparison > ))
 (define gte-hyperreal? (hyperreal-comparison >= ))
 
-(define (standard-part h #!optional (n 1000))
-  (hyperreal-ref h n))
 
 ;; Create an infinitesimal hyperreal number representing the sequence 1/n
 (define infinitesimal
-  (reciprocal-hyperreal (index-hyperreal)))
+  (div-hyperreal 1 (expt-hyperreal 2 (index-hyperreal))))
 
 ;; Create an infinitesimal hyperreal number representing a smaller infinitesimal 1/n^2
 (define infinitesimal-squared
@@ -96,20 +106,24 @@
                   infinitesimal))))
 
 (define (integrate f a b #!optional (n 100))
-  (letrec ((do-integration 
-             (lambda (x sum) 
-               (print (standard-part x))
-               (if (gte-hyperreal? x b n) 
-                   sum
-                   (do-integration 
-                     (add-hyperreal infinitesimal x) 
-                     (add-hyperreal (mul-hyperreal infinitesimal 
-                                                   (f x))
-                                    sum))))))
-    (standard-part (do-integration a 0) n)))
+  ((aitken-extrapolate 
+     (lambda (n) 
+       (letrec ((do-integration 
+                  (lambda (x sum) 
+                    (print (standard-part x n extrapolate?: #f))
+                    ;(print (standard-part b n extrapolate?: #f))
+                    (if (gte-hyperreal? x b n extrapolate?: #f) 
+                        sum
+                        (do-integration 
+                          (add-hyperreal infinitesimal x) 
+                          (add-hyperreal (mul-hyperreal infinitesimal 
+                                                        (f x))
+                                         sum))))))
+         (standard-part (do-integration a 0) n extrapolate?: #f)))) 
+   n))
 
 ;; Example usage:
-(let* ((h1 (real->hyperreal 1))
+(let* ((h1 1)
        (h2 infinitesimal)
        (h3 infinitesimal-squared)
        (h4 (add-hyperreal h1 h2))
