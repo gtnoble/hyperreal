@@ -9,9 +9,9 @@
   1)
 
 (define (first-element x)
-  (hyperreal-ref x 0))
+  (hyper-ref x 0))
 (define (second-element x)
-  (hyperreal-ref x 1))
+  (hyper-ref x 1))
 
 (check (first-element 69) => 69)
 (check (second-element real-hyperreal) => 69)
@@ -91,6 +91,8 @@
              (cos firing-angle))
           (* muzzle-speed
              (sin firing-angle))))
+(define cannonball-mass 1)
+
 (define (cannonball-velocity t y)
   (if-hyperreal (lte-hyperreal t 0)
                 cannonball-initial-velocity
@@ -105,4 +107,10 @@
                       (mul-hyperreal -1
                                       drag-coefficient
                                       (square-hyperreal (vector-norm-hyperreal velocity)))
-                      (normalize-vector-hyperreal velocity))))))
+                      (normalize-vector-hyperreal velocity)))
+        (drag-acceleration (mul-scalar-vector-hyperreal 
+                             (hyperreal-reciprocal cannonball-mass) 
+                             drag-force))
+        (gravitational-acceleration (vector-hyperreal 0 -9.8)))
+    ()
+    ))

@@ -1,25 +1,8 @@
-(import srfi-1)
-
-(define (check-real-or-hyperreal value)
-  (if (not (or (procedure? value) 
-               (number? value)))
-      (error "Not a real or hyperreal number" value)))
-
-(define (check-boolean-or-hyperboolean value)
-  (if (not (or (procedure? value)
-               (boolean? value)))
-      (error "Not a boolean or hyperboolean value" value)))
+(import srfi-1 srfi-133)
 
 ;; Access the nth element of a hyperreal number
-(define (hyperreal-ref x n)
-  (cond ((procedure? x) (x n)) 
-        ((number? x) x)
-        (#t (error "Not a real or hyperreal number" x))))
-
-(define (hyperboolean-ref x n)
-  (cond ((procedure? x) (x n))
-        ((boolean? x) x)
-        (#t (error "Not a boolean or hyperboolean value" x))))
+(define (hyper-ref x n)
+  (if (procedure? x) (x n) x))
 
 (define (memoize func)
   (let ((previous-x '())
@@ -31,17 +14,15 @@
                       (set! previous-y (func x))
                       previous-y)))))
 
-(define (operation-2-hyperreal operator)
+(define (hyper-operation-2 operator)
   (lambda (x y) 
-    (check-real-or-hyperreal x)
-    (check-real-or-hyperreal y)
-    (if (and (number? x) (number? y)) 
-        (operator x y)
-        (memoize 
-          (lambda (n) (operator (hyperreal-ref x n) (hyperreal-ref y n)))))))
+      (if (or (procedure? x) (procedure? y)) 
+          (memoize 
+            (lambda (n) (operator (hyper-ref x n) (hyper-ref y n))))   
+          (operator x y))))
 
-(define (operation-chained-hyperreal pairwise-operator)
-  (let ((pairwise-operation (operation-2-hyperreal pairwise-operator))) 
+(define (hyper-operation-chained pairwise-operator)
+  (let ((pairwise-operation (hyper-operation-2 pairwise-operator))) 
    (letrec ((chained-operation
               (lambda (first-arg second-arg . remaining-args)
                 (let ((accumulated-result (pairwise-operation first-arg second-arg)))
@@ -51,115 +32,114 @@
      chained-operation)))
 
 ;; Create a hyperreal number representing a sequence like 1/n
-(define (operation-1-hyperreal operator)
+(define (hyper-operation-1 operator)
   (lambda (x) 
-    (check-real-or-hyperreal x)
-    (if (number? x) 
-        (operator x)
-        (memoize
-          (lambda (n) (operator (hyperreal-ref x n)))))))
+      (if (procedure? x) 
+          (memoize
+            (lambda (n) (operator (hyper-ref x n))))
+          (operator x))))
 
-(define-syntax if-hyperreal 
+(define-syntax hyper-if 
   (syntax-rules ()
     ((_ condition on-true on-false) 
      (let ((bound-condition condition)) 
       (check-boolean-or-hyperboolean bound-condition)
       (memoize 
-        (lambda (i) (if (hyperboolean-ref bound-condition i) 
-                        (hyperreal-ref on-true i)
-                        (hyperreal-ref on-false i))))))))
+        (lambda (i) (if (hyper-ref bound-condition i) 
+                        (hyper-ref on-true i)
+                        (hyper-ref on-false i))))))))
 
 (define (index-hyperreal)
   (lambda (x) (+ x 1)))
 
+(define (vector-operation-1 operator)
+  (lambda (input-vector)
+    (vector-map operator input-vector)))
+
+(define (vector-fill reference-vector filler)
+  (if (not (vector? filler))
+      (make-vector 
+        (vector-length reference-vector) 
+        filler)
+      filler))
+
+(define (vector-or-scalar-operation-2 scalar-operator)
+  (lambda (x y)
+    (if (or (vector? x) (vector? y))
+        (let ((vector-1 (vector-fill x y))
+              (vector-2 (vector-fill y x))) 
+          (vector-map
+            (lambda (element-1 element-2) 
+              (scalar-operator element-1 element-2))
+            vector-1
+            vector-2))
+        (scalar-operator x y))))
+
+(define (vector-or-scalar-operation-1 scalar-operator)
+  (lambda (x) (if (vector? x)
+                  (vector-map scalar-operator x)
+                  (scalar-operator x))))
+
+(define (scalar-vector-operation operation)
+  (lambda (input-vector scalar)
+    (vector-map
+      (lambda (element) (operation element))
+      input-vector)))
+
+(define (scalar-or-vector-operation-chained scalar-operator)
+  (hyper-operation-chained 
+                        (vector-or-scalar-operation-2 scalar-operator)))
 
 ;; Addition of two hyperreal numbers
-(define add-hyperreal (operation-chained-hyperreal +))
-(define sub-hyperreal (operation-chained-hyperreal -))
-;; Multiplication of two hyperreal numbers
-(define mul-hyperreal (operation-chained-hyperreal *))
-(define div-hyperreal (operation-chained-hyperreal /))
-(define expt-hyperreal (operation-2-hyperreal expt))
-(define lte-hyperreal (operation-2-hyperreal <=))
-(define gte-hyperreal (operation-2-hyperreal >=))
+(define add-hyperreal (scalar-or-vector-operation-chained +))
+(define sub-hyperreal (scalar-or-vector-operation-chained -))
+(define mul-hyperreal (scalar-or-vector-operation-chained *))
+(define div-hyperreal (scalar-or-vector-operation-chained /))
 
-(define reciprocal-hyperreal (operation-1-hyperreal (lambda (x) (/ 1 x))))
-(define exp-hyperreal (operation-1-hyperreal exp))
-(define neg-hyperreal (operation-1-hyperreal -))
-(define sqrt-hyperreal (operation-1-hyperreal sqrt))
-(define square-hyperreal (operation-1-hyperreal (lambda (x) (expt x 2))))
+(define (hyper-scalar-or-vector-operation-2 scalar-operator)
+  (hyper-operation-2
+    (vector-or-scalar-operation-2 scalar-operator)))
 
-(define-record vector-hyperreal length elements)
+(define expt-hyperreal (hyper-scalar-or-vector-operation-2 expt))
 
-(define (check-vector-hyperreal hyperreal-vector)
-  (if (not (vector-hyperreal? hyperreal-vector))
-      (error "Not a hyperreal vector" hyperreal-vector)))
+(define lte-hyperreal (hyper-operation-2 <=))
+(define gte-hyperreal (hyper-operation-2 >=))
+(define gt-hyperreal (hyper-operation-2 >))
 
-(define (vector-hyperreal . elements)
-  (let ((vector-len (length elements))
-        (vector-elements (if (procedure? (car elements)) 
-                             (car elements)
-                             (let ((elements (list->vector elements)))
-                              (lambda (i) (vector-ref elements i)))))) 
-    (make-vector-hyperreal 
-      vector-len 
-      vector-elements)))
+(define (hyper-scalar-or-vector-operation-1 scalar-operator)
+  (hyper-operation-1 
+    (vector-or-scalar-operation-1 
+      scalar-operator)))
 
-(define (vector-hyperreal-ref hyperreal-vector i)
-  (check-vector-hyperreal hyperreal-vector)
-  ((vector-hyperreal-elements hyperreal-vector) i))
+(define reciprocal-hyperreal 
+  (hyper-scalar-or-vector-operation-1
+    (lambda (x) (/ 1 x))))
+(define exp-hyperreal (hyper-scalar-or-vector-operation-1 exp))
+(define neg-hyperreal (hyper-scalar-or-vector-operation-1 -))
+(define sqrt-hyperreal (hyper-scalar-or-vector-operation-1 sqrt))
+(define square-hyperreal (hyper-scalar-or-vector-operation-1 (lambda (x) (expt x 2))))
 
-(define (vector-hyperreal-map hyperreal-operator hyperreal-vector)
-  (check-vector-hyperreal hyperreal-vector)
-  (vector-hyperreal (vector-hyperreal-length hyperreal-vector) 
-                    (lambda (i) 
-                      (hyperreal-operator (vector-hyperreal-ref hyperreal-vector i)))))
+(define hyper-vector-ref (hyper-operation-2 vector-ref))
 
-(define (vector-hyperreal-elementwise-operation hyperreal-operator)
-  (lambda (vector-1 vector-2) 
-    (check-vector-hyperreal vector-1)
-    (check-vector-hyperreal vector-2)
-    (lambda (i) 
-      (hyperreal-operator (vector-hyperreal-ref vector-1 i)
-                          (vector-hyperreal-ref vector-2 i)))))
+(define sum (hyper-operation-1 
+              (lambda (x) (if (vector? x)
+                              (vector-fold add-hyperreal 0 x)
+                              x))))
 
-(define add-vector-hyperreal 
-  (vector-hyperreal-elementwise-operation add-hyperreal))
+(define (vector-norm-squared vect)
+  (sum (square-hyperreal vect)))
 
-(define (vector-norm-squared-hyperreal hyperreal-vector)
-  (check-vector-hyperreal hyperreal-vector)
-  (letrec ((vector-len (vector-hyperreal-length hyperreal-vector))
-           (do-norm 
-             (lambda (square-sum i)
-               (if-hyperreal (gte-hyperreal i vector-len)
-                             square-sum
-                             (do-norm 
-                               (let ((vector-component (vector-hyperreal-ref hyperreal-vector i))) 
-                                (add-hyperreal square-sum 
-                                               (square-hyperreal 
-                                                 vector-component)))
-                               (add-hyperreal 1 i))))))
-    (do-norm 0 0)))
+(define (vector-norm vect)
+  (sqrt-hyperreal (vector-norm-squared vect)))
 
-(define (vector-norm-hyperreal hyperreal-vector)
-  (check-vector-hyperreal hyperreal-vector)
-  (sqrt-hyperreal (vector-norm-squared-hyperreal hyperreal-vector)))
-
-(define (mul-scalar-vector-hyperreal hyperreal-scalar hyperreal-vector)
-  (check-real-or-hyperreal hyperreal-scalar)
-  (check-vector-hyperreal hyperreal-vector)
-  (vector-hyperreal-map hyperreal-vector 
-                        (lambda (hyperreal-component) 
-                          (mul-hyperreal hyperreal-scalar hyperreal-component))))
-
-(define (normalize-hyperreal-vector hyperreal-vector)
-  (check-vector-hyperreal hyperreal-vector)
-  (mul-scalar-vector-hyperreal 
-    (reciprocal-hyperreal (vector-norm-hyperreal hyperreal-vector)) 
-    hyperreal-vector))
+(define (normalize-hyper-vector hyper-vector)
+  (mul-hyperreal 
+    (div-hyperreal hyper-vector 
+                   (hyper-vector-norm hyper-vector))))
 
 (define (check-function func)
-  (if (not (procedure? func)) (error "Not a function" func)))
+  (if (not (procedure? func)) 
+      (error "Not a function" func)))
 
 (define (aitken-extrapolate func)
   (check-function func)
@@ -175,13 +155,12 @@
           (- xn (/ (expt delta-xn 2) delta-squared-xn))))))
 
 (define (standard-part h #!optional (n 1000) #!key (extrapolate? #t))
-  (check-real-or-hyperreal h)
-  (if (number? h) 
-      h 
+  (if (procedure? h) 
       (if extrapolate? 
-          ((aitken-extrapolate (lambda (n) (hyperreal-ref h n))) 
+          ((aitken-extrapolate (lambda (n) (hyper-ref h n))) 
            n)
-          (hyperreal-ref h n))))
+          (hyper-ref h n))
+      h))
 
 ;; Create an infinitesimal hyperreal number representing the sequence 1/n
 (define infinitesimal
@@ -196,15 +175,13 @@
 
 (define (differentiate f #!key (order 1) (direction 'forward))
   (check-function f)
-  (check-real-or-hyperreal order)
   (let ((dx (if (equal? direction 'forward) 
                 infinitesimal
                 (neg-hyperreal infinitesimal))))
-    (if-hyperreal (lte-hyperreal order 0) 
+    (hyper-if (lte-hyperreal order 0) 
                   f
                   (differentiate 
                     (lambda (x) 
-                      (check-real-or-hyperreal x)
                       (div-hyperreal 
                         (sub-hyperreal 
                           (f (add-hyperreal dx x)) 
@@ -214,12 +191,10 @@
 
 (define (integrate f a b)
   (check-function f)
-  (check-real-or-hyperreal a)
-  (check-real-or-hyperreal b)
   (letrec ((delta-x infinitesimal)
            (do-integration 
              (lambda (x running-sum) 
-               (if-hyperreal (gte-hyperreal x b) 
+               (hyper-if (gte-hyperreal x b) 
                              running-sum
                              (do-integration 
                                (add-hyperreal delta-x x) 
@@ -230,7 +205,6 @@
 (define (ode-integrate f df/dt t)
   (check-function f)
   (check-function df/dt)
-  (check-real-or-hyperreal t)
   (let* ((dt negative-infinitesimal)
          (previous-t (add-hyperreal t dt))
          (previous-y (f previous-t))
@@ -240,5 +214,4 @@
     (sub-hyperreal previous-y dy)))
 
 (define (print-hyperreal h #!optional (n 10))
-  (check-real-or-hyperreal h)
-  (print (map (lambda (i) (hyperreal-ref h i)) (iota n))))
+  (print (map (lambda (i) (hyper-ref h i)) (iota n))))
