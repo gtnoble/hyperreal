@@ -64,18 +64,45 @@
 
 (define decay-constant -1)
 
-(define (decay-rate y)
-  (mul-hyperreal decay-constant y))
-
 (define (exponential-decay t)
-  (memoize (let* ((delta-x negative-infinitesimal)
-                  (previous-x (add-hyperreal t delta-x))) 
-             (switch-hyperreal (lte-hyperreal t 0)
-                               1
-                               (let ((previous-y (exponential-decay previous-x))) 
-                                (sub-hyperreal previous-y 
-                                               (mul-hyperreal (decay-rate previous-y) 
-                                                              delta-x)))))))
+  (memoize 
+    (if-hyperreal (lte-hyperreal t 0)
+                  1
+                  (ode-integrate exponential-decay 
+                                 (lambda (t y) (mul-hyperreal y decay-constant))
+                                 t))))
 
 (check (near? (standard-part (exponential-decay 10) 3 extrapolate?: #t) 0) 
               => #t)
+
+(define cannonball-initial-position #(0 0))
+(define (cannonball-trajectory t)
+  (if-hyperreal (lte-hyperreal t 0)
+                cannonball-initial-position
+                (ode-integrate cannonball-trajectory
+                               cannonball-velocity
+                               t)))
+
+(define muzzle-speed 10)
+(define pi (acos -1))
+(define firing-angle (/ pi 4))
+(define cannonball-initial-velocity 
+  (vector (* muzzle-speed 
+             (cos firing-angle))
+          (* muzzle-speed
+             (sin firing-angle))))
+(define (cannonball-velocity t y)
+  (if-hyperreal (lte-hyperreal t 0)
+                cannonball-initial-velocity
+                (ode-integrate cannonball-velocity
+                               cannonball-acceleration
+                               t)))
+
+(define drag-coefficient 1)
+(define (cannonball-acceleration t velocity)
+  (let* ((cannonball-speed (vector-norm-hyperreal y))
+        (drag-force (mul-scalar-vector-hyperreal 
+                      (mul-hyperreal -1
+                                      drag-coefficient
+                                      (square-hyperreal (vector-norm-hyperreal velocity)))
+                      (normalize-vector-hyperreal velocity))))))
