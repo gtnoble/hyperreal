@@ -79,16 +79,29 @@
               (/ 1 3)) => #t)
 
 (define decay-constant -1)
+(define exponential-initial-value 1)
 
-(define (exponential-decay t)
-    (ode-integrate t 
-                   (lambda (t y) 
-                     (multiply-hyper decay-constant y))
-                   0
-                   0))
+(define exponential-decay
+  (ode-solve  (lambda (current-time current-state step-size) 
+                (let* ((y (vector-ref current-state 0))
+                       (y-prime (vector-ref current-state 1))
+                       (dy (multiply-hyper y-prime step-size))
+                       (next-y (add-hyper y dy))
+                       (next-y-prime (multiply-hyper y decay-constant))) 
+                  (vector next-y next-y-prime)))
+              12
+              (make-point 0 
+                          (vector exponential-initial-value 
+                                  (multiply-hyper exponential-initial-value 
+                                                  decay-constant)))))
 
-(check (near? (standard-part (exponential-decay 10) 3 extrapolate?: #t) 0) 
-              => #t)
+(check 
+  (near? 
+    (vector-ref ((standard-part exponential-decay 3 
+                                extrapolate?: #t) 10) 
+                0) 
+    0) 
+  => #t)
 
 (define cannonball-initial-position #(0 0))
 (define muzzle-speed 10)

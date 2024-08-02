@@ -3,7 +3,7 @@
 (define-record hyper ultraproduct)
 
 (define (is-hyper? x)
-  (or (boolean? x) (number? x) (procedure? x) (hyper? x)))
+  (or #t (vector? x) (boolean? x) (number? x) (procedure? x) (hyper? x)))
 
 
 ;; Access the nth element of a hyper number
@@ -43,6 +43,16 @@
   (lambda (f1 f2)
     (lambda (#!rest args) (operator (apply f1 args) (apply f2 args)))))
 
+(define (scalar-operation-2 operator)
+  (lambda (x y)
+    (assert (or (number? x) (procedure? x)))
+    (assert (or (number? y) (procedure? y)))
+    (if (or (procedure? x) (procedure? y))
+        (let ((f1 (functionize x))
+              (f2 (functionize y)))
+          (lambda (#!rest args) (operator (apply f1 args) (apply f2 args))))
+        (operator x y))))
+
 (define (vector-operation-2 scalar-operator)
   (lambda (x y)
     (assert (and (vector? x) (vector? y)))
@@ -51,24 +61,28 @@
       x
       y)))
 
-(define (operation-2 operator)
-  (let* ((scalar-operation 
-          (lambda (x y)
-            (assert (or (number? x) (procedure? x)))
-            (assert (or (number? y) (procedure? y)))
-            (if (or (procedure? x) (procedure? y))
-                (let ((f1 (functionize x))
-                      (f2 (functionize y)))
-                  (lambda (#!rest args) (operator (apply f1 args) (apply f2 args))))
-                (operator x y))))
-        (vector-operation (vector-operation-2 scalar-operation)))
+(define (operation-2 operator #!key (convert-scalar-to-vector? #f))
+  (let* ((scalar-operation (scalar-operation-2 operator))
+         (vector-operation (vector-operation-2 scalar-operation))
+         (fill-vector (lambda (reference-vector scalar)
+                        (make-vector (vector-length reference-vector) 
+                                     scalar))))
     (lambda (x y)
-      (if (and (vector? x) (vector? y))
-          (vector-operation x y)
-          (scalar-operation x y)))))
+      (cond 
+        ((and (vector? x) 
+              (vector? y)) 
+         (vector-operation x y))
+        ((and convert-scalar-to-vector? 
+              (or (vector? x) (vector? y))) 
+         (if (vector? x) 
+             (vector-operation x (fill-vector x y))
+             (vector-operation (fill-vector y x) y)))
+        (#t (scalar-operation x y))))))
 
-(define (hyper-operation-2 number-operator)
-  (let ((operator (operation-2 number-operator))) 
+(define (hyper-operation-2 number-operator 
+                           #!key (convert-scalar-to-vector? #f))
+  (let ((operator (operation-2 number-operator 
+                               convert-scalar-to-vector?: convert-scalar-to-vector?))) 
    (lambda (x y) 
     (if (or (hyper? x) 
             (hyper? y)) 
@@ -90,13 +104,17 @@
                     (apply chained-operation accumulated-result remaining-args))))))
     chained-operation))
 
-(define (chained-hyper-operation operator)
-  (operation-chained (hyper-operation-2 operator)))
+(define (chained-hyper-operation operator 
+                                 #!key (convert-scalar-to-vector? #f))
+  (operation-chained 
+    (hyper-operation-2 operator 
+                       convert-scalar-to-vector?: convert-scalar-to-vector?)))
 
 (define add-hyper (chained-hyper-operation +))
 (define subtract-hyper (chained-hyper-operation -))
-(define multiply-hyper (chained-hyper-operation *))
-(define divide-hyper (chained-hyper-operation /))
+
+(define multiply-hyper (chained-hyper-operation * convert-scalar-to-vector?: #t))
+(define divide-hyper (chained-hyper-operation / convert-scalar-to-vector?: #t))
 
 (define (vector-operation-1 scalar-operator)
   (lambda (x) 
@@ -147,10 +165,6 @@
 
 (define (index-hyper)
   (make-hyper (lambda (i) (+ i 1))))
-
-;; Addition of two hyper numbers
-(define (scalar-multiply-vector scalar vect)
-  (vector-map (lambda (element) (multiply-hyper scalar element)) vect))
 
 (define expt-hyper (hyper-operation-2 expt))
 
@@ -226,8 +240,8 @@
   (reciprocal-hyper (expt-hyper (index-hyper) 2)))
 
 (define (integrate f a b #!key (step-size infinitesimal))
-  (assert (procedure? f))
   (hyper-map (lambda (f a b step-size) 
+               (assert (procedure? f))
                (letrec ((delta-x step-size)
                         (do-integration 
                           (lambda (x running-sum) 
@@ -260,56 +274,78 @@
 (define (differentiate f #!key (direction 'forward) (step-size infinitesimal))
   (assert (is-hyper? f))
   (assert (is-hyper? step-size))
-  (hyper-map (lambda (fi dx) 
-               (lambda (x) 
-                 (divide-hyper 
-                   (subtract-hyper 
-                     (fi (add-hyper dx x)) 
-                     (fi x)) 
-                   dx)))
-             f (if (equal? direction 'forward) 
-                   step-size
-                   (negate-hyper step-size))))
+  (let ((dx (if (equal? direction 'forward) 
+                step-size
+                (negate-hyper step-size)))) 
+    (hyper-map (lambda (fi dx) 
+                 (lambda (x) 
+                   (divide-hyper 
+                     (subtract-hyper 
+                       (fi (add-hyper dx x)) 
+                       (fi x)) 
+                     dx)))
+               f dx)))
 
 (define-record point x y)
 
 (define (make-interpolant-1d coords)
-  (let* ((adjacent-x-differences (lambda (point-1 point-2) 
-                                   (- (point-x point-1) (point-x point-2))))
+  (assert (vector? coords))
+  (let* ((comparison-order (lambda (x1 x2)
+                             (- x2 x1)))
          (compare-x-values (lambda (point-1 point-2) 
-                             (<= 0 (adjacent-x-differences point-1 point-2))))
+                             (assert (point? point-1))
+                             (assert (point? point-2))
+                             (<= 0 (comparison-order (point-x point-1) 
+                                                     (point-x point-2)))))
          (ordered-coords (vector-sort compare-x-values coords)))
     (lambda (xi)
-      (let* ((before-point (binary-search ordered-coords 
-                                          (lambda (candidate) 
-                                            (compare-x-values candidate xi))))
-             (after-point (binary-search ordered-coords 
-                                         (lambda (candidate) 
-                                           (- (compare-x-values candidate xi)))))
-             (delta-x (subtract-hyper (point-x after-point) 
-                                      (point-x before-point)))
-             (delta-y (subtract-hyper (point-y after-point) 
-                                      (point-y before-point)))
-             (slope (divide-hyper delta-y delta-x)))
-        (hyper-add (point-y before-point) 
-                   (hyper-multiply (subtract-hyper xi 
-                                                   (point-x before-point))
-                                   slope))))))
+      (let* ((before-x (binary-search ordered-coords 
+                                      (lambda (candidate) 
+                                        (assert (point? candidate))
+                                        (comparison-order (point-x candidate) xi))))
+             (after-x (add-hyper before-x 1))
+             (before-point (vector-ref ordered-coords before-x))
+             (after-point (vector-ref ordered-coords after-x)))
+        (assert (point? before-point))
+        (assert (point? after-point))
+        (let* ((delta-x (subtract-hyper (point-x after-point) 
+                                        (point-x before-point)))
+               (delta-y (subtract-hyper (point-y after-point) 
+                                        (point-y before-point)))
+               (slope (divide-hyper delta-y delta-x)))
+          (add-hyper (point-y before-point) 
+                     (multiply-hyper (subtract-hyper xi 
+                                                     (point-x before-point))
+                                     slope)))))))
 
-(define (ode-integrate t df/dt t0 y0 #!key (step-size infinitesimal))
-  (assert (procedure? df/dt))
-  (letrec ((do-integrate 
-             (lambda (current-t current-y) 
-               (hyper-if (gte-hyper current-t t)
-                         current-y
-                         (let* ((dt step-size)
-                                (dy (multiply-hyper 
-                                      (df/dt current-t current-y) 
-                                      dt))
-                                (next-t (add-hyper current-t dt))
-                                (next-y (add-hyper current-y dy)))
-                           (do-integrate next-t next-y))))))
-    (do-integrate t0 y0)))
+(define (ode-solve update-function 
+                   final-time 
+                   initial-values 
+                   #!key (step-size infinitesimal))
+  (hyper-map 
+    (lambda (update-function final-time initial-values step-size)
+      (assert (procedure? update-function))
+      (assert (point? initial-values))
+      (letrec ((update-ode-state 
+                 (lambda (points)
+                   (let* ((current-point (car points))
+                          (current-time (point-x current-point))
+                          (current-state (point-y current-point))) 
+                     (hyper-if (gte-hyper current-time final-time) 
+                               points
+                               (let ((next-state 
+                                       (update-function current-time 
+                                                        current-state 
+                                                        step-size))
+                                     (next-time
+                                       (add-hyper current-time step-size)))
+                                 (update-ode-state 
+                                   (cons (make-point next-time next-state) 
+                                         points))))))))
+        (let ((ode-solution-points 
+                (update-ode-state (list initial-values))))
+          (make-interpolant-1d (list->vector ode-solution-points)))))
+    update-function final-time initial-values step-size))
 
 (define (print-hyper h #!optional (n 10))
   (print (map (lambda (i) (hyper-ref h i)) (iota n))))
