@@ -78,22 +78,27 @@
                 (integrate parabolic-function 0 one-hyper)) 
               (/ 1 3)) => #t)
 
+(define target-value 2.5)
+(check (find-next-smallest-value-index #(1 2 3 4 5) 
+                                       (lambda (candidate) (< candidate target-value)))
+       => 1)
+
 (define decay-constant -1)
 (define exponential-initial-value 1)
 
 (define exponential-decay
-  (ode-solve  (lambda (current-time current-state step-size) 
+  (ode-solve  (lambda (current-time current-state differential) 
                 (let* ((y (vector-ref current-state 0))
                        (y-prime (vector-ref current-state 1))
-                       (dy (multiply-hyper y-prime step-size))
+                       (dy (differential y-prime))
                        (next-y (add-hyper y dy))
                        (next-y-prime (multiply-hyper y decay-constant))) 
                   (vector next-y next-y-prime)))
+              0
               12
-              (make-point 0 
-                          (vector exponential-initial-value 
-                                  (multiply-hyper exponential-initial-value 
-                                                  decay-constant)))))
+              (vector exponential-initial-value 
+                      (multiply-hyper exponential-initial-value 
+                                      decay-constant))))
 
 (check 
   (near? 
@@ -115,29 +120,36 @@
 (define cannonball-mass 1)
 (define drag-coefficient 1)
 
-(define (cannonball-trajectory t)
-  (ode-integrate t
-                 cannonball-velocity
-                 0
-                 cannonball-initial-position))
+(define (cannonball-trajectory final-time)
+  (let ((calculate-acceleration 
+         (lambda (velocity)
+           (let* ((drag-force (multiply-hyper 
+                                -1
+                                drag-coefficient
+                                (hyper-vector-norm-squared velocity)
+                                (normalize-hyper-vector velocity)))
+                  (drag-acceleration (divide-hyper 
+                                       drag-force
+                                       cannonball-mass))
+                  (gravitational-acceleration (vector 0 -9.8)))
+             (add-hyper drag-force gravitational-acceleration))))) 
+    (ode-solve (lambda (current-time current-state differential)
+                 (let ((current-position (vector-ref current-state 0))
+                       (current-velocity (vector-ref current-state 1))
+                       (current-acceleration (vector-ref current-state 2)))
+                   (let ((next-position 
+                           (add-hyper current-position 
+                                      (differential current-velocity)))
+                         (next-velocity 
+                           (add-hyper current-velocity
+                                      (differential current-acceleration)))
+                         (next-acceleration 
+                           (calculate-acceleration current-velocity)))
+                     (vector next-position next-velocity next-acceleration))))
+               0
+               final-time
+               (vector cannonball-initial-position 
+                       cannonball-initial-velocity 
+                       (calculate-acceleration cannonball-initial-velocity)))))
 
-(define (cannonball-velocity t position)
-  ;(print (hyper-ref position 10))
-  (ode-integrate t
-                 cannonball-acceleration
-                 0
-                 cannonball-initial-velocity))
-
-(define (cannonball-acceleration t velocity)
-  (let* ((drag-force (mul-hyper 
-                       -1
-                       drag-coefficient
-                       (hyper-vector-norm-squared velocity)
-                       (normalize-hyper-vector velocity)))
-         (drag-acceleration (div-hyper 
-                              drag-force
-                              cannonball-mass))
-         (gravitational-acceleration (vector 0 -9.8)))
-    (add-hyper drag-force gravitational-acceleration)))
-
-(print-hyper (standard-part (cannonball-trajectory 0.1) 10 extrapolate?: #f))
+(print ((standard-part (cannonball-trajectory 1) 8 extrapolate?: #t) 0.5))
