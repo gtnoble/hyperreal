@@ -69,8 +69,8 @@
   (expt-hyper x 2))
 (check (parabolic-function 2) => 4)
 (define parabolic-derivative (differentiate parabolic-function))
-(check (near? ((standard-part parabolic-derivative) 1) 2) => #t)
-(check (near? (standard-part (hyper-eval parabolic-derivative one-hyper)) 2) => #t)
+(check (near? (standard-part (parabolic-derivative 1)) 2) => #t)
+(check (near? (standard-part (parabolic-derivative one-hyper)) 2) => #t)
 (check (near? (limited-standard-part 
                 (integrate parabolic-function 0 1)) 
               (/ 1 3)) => #t)
@@ -86,24 +86,25 @@
 (define decay-constant -1)
 (define exponential-initial-value 1)
 
-(define exponential-decay
-  (ode-solve  (lambda (current-time current-state differential) 
-                (let* ((y (vector-ref current-state 0))
-                       (y-prime (vector-ref current-state 1))
-                       (dy (differential y-prime))
-                       (next-y (add-hyper y dy))
-                       (next-y-prime (multiply-hyper y decay-constant))) 
-                  (vector next-y next-y-prime)))
-              0
-              12
-              (vector exponential-initial-value 
-                      (multiply-hyper exponential-initial-value 
-                                      decay-constant))))
+(define (exponential-decay time)
+  (ode-solve  
+    (lambda (current-time current-state differential) 
+      (let* ((y (hyper-vector-ref current-state 0))
+             (y-prime (hyper-vector-ref current-state 1))
+             (dy (differential y-prime))
+             (next-y (add-hyper y dy))
+             (next-y-prime (multiply-hyper y decay-constant))) 
+        (make-hyper-vector next-y next-y-prime)))
+    0
+    time
+    (make-hyper-vector exponential-initial-value 
+                       (multiply-hyper exponential-initial-value 
+                                       decay-constant))))
 
 (check 
   (near? 
-    (vector-ref ((standard-part exponential-decay 3 
-                                extrapolate?: #t) 10) 
+    (vector-ref (standard-part (exponential-decay 10) 
+                               5 extrapolate?: #t) 
                 0) 
     0) 
   => #t)
@@ -131,12 +132,12 @@
                   (drag-acceleration (divide-hyper 
                                        drag-force
                                        cannonball-mass))
-                  (gravitational-acceleration (vector 0 -9.8)))
+                  (gravitational-acceleration (make-hyper-vector 0 -9.8)))
              (add-hyper drag-force gravitational-acceleration))))) 
     (ode-solve (lambda (current-time current-state differential)
-                 (let ((current-position (vector-ref current-state 0))
-                       (current-velocity (vector-ref current-state 1))
-                       (current-acceleration (vector-ref current-state 2)))
+                 (let ((current-position (hyper-vector-ref current-state 0))
+                       (current-velocity (hyper-vector-ref current-state 1))
+                       (current-acceleration (hyper-vector-ref current-state 2)))
                    (let ((next-position 
                            (add-hyper current-position 
                                       (differential current-velocity)))
@@ -145,11 +146,13 @@
                                       (differential current-acceleration)))
                          (next-acceleration 
                            (calculate-acceleration current-velocity)))
-                     (vector next-position next-velocity next-acceleration))))
+                     (make-hyper-vector next-position next-velocity next-acceleration))))
                0
                final-time
-               (vector cannonball-initial-position 
+               (make-hyper-vector cannonball-initial-position 
                        cannonball-initial-velocity 
                        (calculate-acceleration cannonball-initial-velocity)))))
 
-(print ((standard-part (cannonball-trajectory 1) 8 extrapolate?: #t) 0.5))
+(print (standard-part (cannonball-trajectory 0.5) 6 extrapolate?: #t))
+
+(check (standard-part (gradient-descent parabolic-function 0.01 1) 8) => 0)

@@ -142,6 +142,33 @@
                     (hyper-ref on-false i))))))
           (if bound-condition on-true on-false))))))
 
+(define (hyper-map func #!rest hyper-vals)
+  (make-hyper 
+    (memoize 
+      (lambda (i)
+        (assert (integer? i))
+        (apply func 
+               (map 
+                 (lambda (hyper) 
+                   (hyper-ref hyper i)) 
+                 hyper-vals))))))
+
+(define-syntax hyper-define
+  (syntax-rules ()
+    ((_ (name) form1 ...)
+     (define (name)
+       (hyper-map (lambda () form1 ...))))
+    ((_ (name arg1 ...) form1 ...)
+     (define (name arg1 ...)
+       (hyper-map (lambda (arg1 ...) form1 ...)
+                  arg1 ...)))))
+
+(hyper-define (hyper-vector-ref hyper-vector index)
+              (vector-ref hyper-vector index))
+
+(define (make-hyper-vector #!rest components)
+  (apply hyper-map vector components))
+
 (define (index-hyper)
   (make-hyper (lambda (i) (+ i 1))))
 
@@ -159,26 +186,21 @@
 (define sqrt-hyper (hyper-operation-1 sqrt))
 (define square-hyper (hyper-operation-1 (lambda (x) (expt x 2))))
 
-(define (sum-vector-elements vect) 
+(hyper-define (sum-vector-elements vect) 
   (assert (vector? vect))
   (vector-fold add-hyper 0 vect))
 
 (define (vector-dot vector-1 vector-2)
-  (assert (vector? vector-1))
-  (assert (vector? vector-2))
   (sum-vector-elements 
     (multiply-hyper vector-1 vector-2)))
 
 (define (hyper-vector-norm-squared vect)
-  (assert (vector? vect))
   (vector-dot vect vect))
 
 (define (hyper-vector-norm vect)
-  (assert (vector? vect))
   (sqrt-hyper (hyper-vector-norm-squared vect)))
 
 (define (normalize-hyper-vector hyper-vector)
-  (assert (vector? hyper-vector))
   (divide-hyper hyper-vector 
                  (hyper-vector-norm hyper-vector)))
 
@@ -192,7 +214,8 @@
            (delta-squared-xn (add-hyper xn 
                                         (negate-hyper (multiply-hyper 2 xn+1)) 
                                         xn+2)))
-      (hyper-if (eq-hyper 0 delta-squared-xn) 
+      (hyper-if (eq-hyper (multiply-hyper 0 delta-squared-xn) 
+                          delta-squared-xn) 
                 xn
                 (subtract-hyper xn 
                                 (divide-hyper (expt-hyper delta-xn 2) 
@@ -214,160 +237,71 @@
 (define negative-infinitesimal
   (negate-hyper infinitesimal))
 
+(define infinity (expt-hyper 2 (index-hyper)))
+
 ;; Create an infinitesimal hyper number representing a smaller infinitesimal 1/n^2
 (define infinitesimal-squared
   (reciprocal-hyper (expt-hyper (index-hyper) 2)))
-
-(define (integrate f a b #!key (step-size infinitesimal))
-  (hyper-map (lambda (f a b delta-x) 
-               (define (do-integration x running-sum) 
-                 (hyper-if (gte-hyper x b) 
-                           running-sum
-                           (do-integration 
-                             (add-hyper delta-x x) 
-                             (add-hyper (multiply-hyper delta-x (f x)) 
-                                        running-sum))))
-               (assert (procedure? f))
-               (do-integration a 0))
-             f
-             a
-             b
-             step-size))
-
-(define (hyper-map func #!rest hyper-vals)
-  (make-hyper 
-    (lambda (i)
-      (apply func 
-             (map 
-               (lambda (hyper) 
-                 (hyper-ref hyper i)) 
-               hyper-vals)))))
 
 (define (hyper-eval hyperfunction #!rest args)
   (apply hyper-map (lambda (function-slice #!rest arg-slices) 
                      (apply function-slice arg-slices)) 
          hyperfunction args))
 
-(define (differentiate f #!key (direction 'forward) (step-size infinitesimal))
+(define (integrate f a b #!key (step-size infinitesimal))
+  (define (do-integration x running-sum) 
+    (hyper-if (gte-hyper x b) 
+              running-sum
+              (do-integration 
+                (add-hyper step-size x) 
+                (add-hyper (multiply-hyper step-size (hyper-eval f x)) 
+                           running-sum))))
+  (assert (procedure? f))
+  (do-integration a 0))
+
+
+(define (differentiate f #!key (step-size infinitesimal))
   (assert (is-hyper? f))
   (assert (is-hyper? step-size))
-  (let ((dx (if (equal? direction 'forward) 
-                step-size
-                (negate-hyper step-size)))) 
-    (hyper-map (lambda (fi dx) 
-                 (lambda (x) 
-                   (divide-hyper 
-                     (subtract-hyper 
-                       (fi (add-hyper dx x)) 
-                       (fi x)) 
-                     dx)))
-               f dx)))
-
-(define (get-x coordinate)
-  (assert (pair? coordinate))
-  (car coordinate))
-
-(define (get-y coordinate)
-  (assert (pair? coordinate))
-  (cdr coordinate))
-
-(define (make-coordinate x y)
-  (cons x y))
-
-(define (make-1d-linear-function coordinate-1 coordinate-2)
-  (assert (pair? coordinate-1))
-  (assert (pair? coordinate-2))
-  (let* ((x1 (get-x coordinate-1))
-         (y1 (get-y coordinate-1))
-         (x2 (get-x coordinate-2))
-         (y2 (get-y coordinate-2))
-         (delta-x (subtract-hyper x2 x1))
-         (delta-y (subtract-hyper y2 y1))
-         (slope (if (equal? delta-y 0) 
-                    0
-                    (divide-hyper delta-y delta-x))))
-    (lambda (xi) 
-      (add-hyper y1 
-                 (multiply-hyper (subtract-hyper xi x1)
-                                 slope)))))
-
-(define (sort-coordinates-by-x coordinates)
-  (assert (vector? coordinates))
-  (vector-sort 
-    (lambda (point-1 point-2) 
-      (assert (pair? point-1))
-      (assert (pair? point-2))
-      (<= (get-x point-1) 
-          (get-x point-2)))
-    coordinates))
-
-(define (find-next-smallest-value-index vect comparator)
-  (define (do-search left-index right-index)
-    (if (>= left-index right-index) 
-        left-index
-        (let* ((middle-index (floor (/ (+ left-index right-index) 
-                                       2)))
-               (middle-element (vector-ref vect middle-index)))
-          (if (comparator middle-element)
-              (do-search (+ middle-index 1) right-index)
-              (do-search left-index middle-index)))))
-  (- (do-search 0 (vector-length vect)) 
-     1))
-
-(define (make-interpolant-1d coordinates)
-  (assert (vector? coordinates))
-  (let* ((ordered-coordinates (sort-coordinates-by-x coordinates))
-         (first-coordinate (vector-ref ordered-coordinates 0))
-         (smallest-x (get-x first-coordinate))
-         (last-coordinate (vector-ref ordered-coordinates 
-                                      (- (vector-length ordered-coordinates) 1)))
-         (largest-x (get-x last-coordinate)))
-    (lambda (xi)
-      (assert (>= xi smallest-x))
-      (assert (<= xi largest-x))
-      (cond ((= xi smallest-x) (get-y first-coordinate))
-            ((= xi largest-x) (get-y last-coordinate)) 
-            (#t 
-             (let* ((before-xi-index 
-                      (find-next-smallest-value-index ordered-coordinates 
-                                                      (lambda (candidate) 
-                                                        (< (get-x candidate) 
-                                                           xi)))))
-               (let* ((after-xi-index (add-hyper before-xi-index 1))
-                      (before-point (vector-ref ordered-coordinates before-xi-index))
-                      (after-point (vector-ref ordered-coordinates after-xi-index)))
-                 ((make-1d-linear-function before-point after-point) xi))))))))
+  (lambda (x) 
+    (divide-hyper 
+      (subtract-hyper 
+        (hyper-eval f (add-hyper step-size x)) 
+        (hyper-eval f x)) 
+      step-size)))
 
 (define (ode-solve update-function 
                    initial-time
                    final-time 
                    initial-state 
                    #!key (step-size infinitesimal))
-  (hyper-map 
-    (lambda (update-function initial-time final-time initial-state step-size)
-      (define (update-ode-state points)
-        (let* ((current-point (car points))
-               (current-time (get-x current-point))
-               (current-state (get-y current-point))
-               (differential (lambda (derivative) 
-                               (multiply-hyper derivative step-size)))) 
-          (hyper-if (gte-hyper current-time final-time) 
-                    points
-                    (let ((next-state 
-                            (update-function current-time 
-                                             current-state 
-                                             differential))
-                          (next-time
-                            (add-hyper current-time step-size)))
-                      (update-ode-state 
-                        (cons (make-coordinate next-time next-state) 
-                              points))))))
-      (assert (procedure? update-function))
-      (assert (>= final-time initial-time))
-      (let ((ode-solution-points 
-              (update-ode-state (list (make-coordinate initial-time initial-state)))))
-        (make-interpolant-1d (list->vector ode-solution-points))))
-    update-function initial-time final-time initial-state step-size))
+  (define (differential derivative) 
+    (multiply-hyper derivative step-size)) 
+  (define (update-ode-state current-time current-state)
+    (hyper-if (gte-hyper current-time final-time) 
+              current-state
+              (let ((next-state 
+                      (update-function current-time 
+                                       current-state 
+                                       differential))
+                    (next-time
+                      (add-hyper current-time step-size)))
+                (update-ode-state next-time next-state))))
+  (assert (procedure? update-function))
+  (assert (>= final-time initial-time))
+  (update-ode-state initial-time initial-state))
+
+(define (gradient-descent f gain initial-location 
+                          #!key (step-size infinitesimal) (num-steps infinity))
+  (let ((gradient (differentiate f step-size: step-size)))
+   (define (do-descent current-location current-step-count)
+     (hyper-if (gte-hyper current-step-count num-steps)
+               current-location
+               (do-descent (subtract-hyper current-location 
+                                           (multiply-hyper (gradient current-location) 
+                                                           gain))
+                           (add-hyper current-step-count 1))))
+   (do-descent initial-location 0)))
 
 (define (print-hyper h #!optional (n 10))
   (print (map (lambda (i) (hyper-ref h i)) (iota n))))
