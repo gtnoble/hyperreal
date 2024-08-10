@@ -1,0 +1,14 @@
+Test Circuit
+
+V1 N001 0 0 AC 1
+R1 N002 N001 10
+L1 N003 N002 1n 
+L2 output N003 1n
+C1 N003 0 1u
+C2 output 0 1u
+R2 output 0 50
+
+.ac dec 20 100k 1G
+
+.end
+

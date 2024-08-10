@@ -1,4 +1,4 @@
-(import srfi-1 srfi-132 srfi-133 srfi-69)
+(import srfi-1 srfi-133 srfi-69)
 
 (: make-nonstandard (ultrafilter-type --> nonstandard-type))
 (define (make-nonstandard f)
@@ -306,7 +306,7 @@
                      #!optional hyperfield hyperfield 
                      -> hyperfield))
 (define (gradient-descent f gain initial-location 
-                          #!optional (step-size infinitesimal) (num-steps infinity))
+                          #!optional (step-size infinitesimal) (min-step-change infinitesimal))
   (let ((gradient (differentiate f step-size)))
    (define (do-descent current-location current-step-count)
      (hyper-if (gte-hyper current-step-count num-steps)

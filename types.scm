@@ -13,7 +13,7 @@
     ((_ type-name base-type)
      (define-type type-name (pair symbol (fixnum -> base-type))))))
 
-(define-type number-type (or float fixnum))
+(define-type number-type (or float fixnum cplxnum))
 (define-type vector-type (vector-of number-type))
 
 (define-hyper-type hyperreal number-type)

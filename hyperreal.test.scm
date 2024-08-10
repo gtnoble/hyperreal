@@ -72,8 +72,8 @@
 (define target-value 2.5)
 
 
-(define decay-constant -1)
-(define exponential-initial-value 1)
+(define decay-constant -1.0)
+(define exponential-initial-value 1.0)
 
 (define (exponential-decay time)
   (define (update-state current-time current-state differential)
